@@ -41,7 +41,15 @@ def fetch_and_store_data():
 
         if not data.get("success"):
             print("錯誤：API 回應失敗。")
+            print("收到的原始資料：", data)
             return
+
+        # --- 偵錯步驟：印出收到的完整資料 ---
+        import json
+        print("--- API 回傳的原始資料 ---")
+        print(json.dumps(data, indent=2, ensure_ascii=False))
+        print("--- 偵錯結束 ---")
+        # --- 偵錯步驟結束 ---
         
         # CWA API 可能有兩種結構，增加彈性以應對
         try:

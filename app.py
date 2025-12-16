@@ -40,15 +40,28 @@ def run_crawler():
     st.info("正在執行爬蟲腳本 `weather_crawler.py`...")
     with st.spinner('正在從中央氣象署獲取最新資料，請稍候...'):
         try:
-            # 使用與 Streamlit 相同環境的 Python 解譯器來執行爬蟲
-            result = subprocess.run([sys.executable, CRAWLER_SCRIPT], capture_output=True, text=True, check=True)
-            st.success("資料更新成功！")
-            st.code(result.stdout)
-        except subprocess.CalledProcessError as e:
-            st.error("更新資料失敗！爬蟲腳本執行出錯。")
-            st.code(e.stderr)
+            # 執行爬蟲，不論成功失敗都捕捉輸出
+            result = subprocess.run(
+                [sys.executable, CRAWLER_SCRIPT], 
+                capture_output=True, 
+                text=True, 
+                check=False  # 設定為 False，這樣即使腳本出錯也不會拋出異常
+            )
+            
+            # 將所有輸出都顯示在網頁上，方便偵錯
+            st.header("背景腳本執行日誌")
+            all_output = f"--- STDOUT ---\n{result.stdout}\n\n--- STDERR ---\n{result.stderr}"
+            st.code(all_output, language="bash")
+
+            if result.returncode == 0:
+                st.success("資料更新成功！")
+            else:
+                st.error("更新資料失敗！請查看上面的日誌以了解詳情。")
+
         except FileNotFoundError:
             st.error(f"錯誤：找不到爬蟲腳本 '{CRAWLER_SCRIPT}'。")
+        except Exception as e:
+            st.error(f"執行爬蟲時發生未預期的錯誤：{e}")
 
 
 # --- Streamlit App 介面 ---
