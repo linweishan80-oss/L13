@@ -4,20 +4,19 @@ import os
 
 # --- 常數設定 ---
 API_KEY = "CWA-7CBFEDE7-EE71-435C-A4BF-4CB481238FB4"
-# 使用者要求的 API (一般天氣預報-一週天氣預報)
-API_URL = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-A0010-001?Authorization={API_KEY}&format=JSON"
+# 改用新的 API 端點 (鄉鎮天氣預報)
+API_URL = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-091?Authorization={API_KEY}&format=JSON"
 DB_NAME = "data.db"
 TABLE_NAME = "weather"
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(PROJECT_DIR, DB_NAME)
 
 def init_db():
-    """初始化資料庫，建立符合要求的資料表"""
+    """初始化資料庫，刪除舊表並建立新表"""
     print("正在初始化資料庫...")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(f"DROP TABLE IF EXISTS {TABLE_NAME}")
-    # 根據使用者要求建立資料表
     cursor.execute(f"""
     CREATE TABLE {TABLE_NAME} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,25 +43,30 @@ def fetch_and_store_data():
             print("錯誤：API 回應失敗。")
             return
         
-        locations = data['records']['location']
+        # 新 API 的資料位於 records['locations'][0]['location']
+        locations = data['records']['locations'][0]['location']
         
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # 清空舊資料，以確保每次都是最新的預報
-        cursor.execute(f"DELETE FROM {TABLE_NAME}")
+        # init_db 已經 drop 過 table，這裡可以不用 delete
         print("正在更新資料庫...")
 
         for loc in locations:
             location_name = loc['locationName']
             weather_elements = loc['weatherElement']
             
-            # 從 weatherElement 中提取所需資料
-            min_temp = next((elem['time'][0]['parameter']['parameterName'] for elem in weather_elements if elem['elementName'] == 'MinT'), None)
-            max_temp = next((elem['time'][0]['parameter']['parameterName'] for elem in weather_elements if elem['elementName'] == 'MaxT'), None)
-            description = next((elem['time'][0]['parameter']['parameterName'] for elem in weather_elements if elem['elementName'] == 'Wx'), None)
+            # 根據新的 JSON 結構提取資料
+            # 我們取第一個時間段 (time[0]) 的預報
+            wx_element = next((elem for elem in weather_elements if elem['elementName'] == 'Wx'), None)
+            min_t_element = next((elem for elem in weather_elements if elem['elementName'] == 'MinT'), None)
+            max_t_element = next((elem for elem in weather_elements if elem['elementName'] == 'MaxT'), None)
 
-            if all((min_temp, max_temp, description)):
+            if all((wx_element, min_t_element, max_t_element)):
+                description = wx_element['time'][0]['elementValue'][0]['value']
+                min_temp = min_t_element['time'][0]['elementValue'][0]['value']
+                max_temp = max_t_element['time'][0]['elementValue'][0]['value']
+
                 cursor.execute(f"""
                 INSERT INTO {TABLE_NAME} (location, min_temp, max_temp, description)
                 VALUES (?, ?, ?, ?)
