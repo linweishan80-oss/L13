@@ -16,9 +16,10 @@ def init_db():
     print("正在初始化資料庫...")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute(f"DROP TABLE IF EXISTS {TABLE_NAME}")
     # 根據使用者要求建立資料表
     cursor.execute(f"""
-    CREATE TABLE IF NOT EXISTS {TABLE_NAME} (
+    CREATE TABLE {TABLE_NAME} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         location TEXT,
         min_temp REAL,
