@@ -1,11 +1,13 @@
 import requests
 import sqlite3
 import os
+import re
+import json
 
 # --- 常數設定 ---
-API_KEY = "CWA-7CBFEDE7-EE71-435C-A4BF-4CB481238FB4"
-# 改用新的 API 端點 (鄉鎮天氣預報)
-API_URL = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/F-D0047-091?Authorization={API_KEY}&format=JSON"
+# 使用使用者提供的 API 金鑰和資料集
+API_KEY = "CWA-1FFDDAEC-161F-46A3-BE71-93C32C52829F"
+API_URL = f"https://opendata.cwa.gov.tw/fileapi/v1/opendataapi/F-A0010-001?Authorization={API_KEY}&downloadType=WEB&format=JSON"
 DB_NAME = "data.db"
 TABLE_NAME = "weather"
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,59 +34,45 @@ def init_db():
 
 def fetch_and_store_data():
     """從 API 下載資料並存入資料庫"""
-    print("正在從中央氣象署下載天氣預報資料...")
+    print(f"正在從 CWA 開放資料平台下載資料 (F-A0010-001)...")
     try:
-        # 禁用 SSL 憑證驗證
+        # 警告：在生產環境中不建議禁用 SSL 驗證。此處為了解決本地憑證問題而使用。
+        # 禁用 SSL 驗證會產生警告，以下程式碼可以將其隱藏
+        from requests.packages.urllib3.exceptions import InsecureRequestWarning
+        requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+        # 禁用 SSL 憑證驗證 (verify=False)
         response = requests.get(API_URL, verify=False)
-        response.raise_for_status()
+        response.raise_for_status()  # 如果請求失敗 (如 404, 500)，會拋出異常
         data = response.json()
 
-        if not data.get("success"):
-            print("錯誤：API 回應失敗。")
-            print("收到的原始資料：", data)
-            return
-
-        # --- 偵錯步驟：印出收到的完整資料 ---
-        import json
-        print("--- API 回傳的原始資料 ---")
-        print(json.dumps(data, indent=2, ensure_ascii=False))
-        print("--- 偵錯結束 ---")
-        # --- 偵錯步驟結束 ---
-        
-        # CWA API 可能有兩種結構，增加彈性以應對
-        try:
-            # 結構 1: records -> locations -> location
-            locations = data['records']['locations'][0]['location']
-        except KeyError:
-            # 結構 2: records -> location
-            locations = data['records']['location']
+        # 根據新的 API 結構，更新資料路徑
+        locations = data['cwaopendata']['resources']['resource']['data']['agrWeatherForecasts']['weatherForecasts']['location']
         
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
 
-        # init_db 已經 drop 過 table，這裡可以不用 delete
-        print("正在更新資料庫...")
-
+        print("正在解析資料並存入資料庫...")
         for loc in locations:
-            location_name = loc['locationName']
-            weather_elements = loc['weatherElement']
+            location_name = loc.get('locationName', '未知地區')
             
-            # 根據新的 JSON 結構提取資料
-            # 我們取第一個時間段 (time[0]) 的預報
-            wx_element = next((elem for elem in weather_elements if elem['elementName'] == 'Wx'), None)
-            min_t_element = next((elem for elem in weather_elements if elem['elementName'] == 'MinT'), None)
-            max_t_element = next((elem for elem in weather_elements if elem['elementName'] == 'MaxT'), None)
+            try:
+                # 新結構直接提供每日預報，我們取第一筆 (today)
+                weather_elements = loc['weatherElements']
+                description = weather_elements['Wx']['daily'][0]['weather']
+                min_temp = weather_elements['MinT']['daily'][0]['temperature']
+                max_temp = weather_elements['MaxT']['daily'][0]['temperature']
 
-            if all((wx_element, min_t_element, max_t_element)):
-                description = wx_element['time'][0]['elementValue'][0]['value']
-                min_temp = min_t_element['time'][0]['elementValue'][0]['value']
-                max_temp = max_t_element['time'][0]['elementValue'][0]['value']
-
+                # 插入資料庫
                 cursor.execute(f"""
                 INSERT INTO {TABLE_NAME} (location, min_temp, max_temp, description)
                 VALUES (?, ?, ?, ?)
                 """, (location_name, float(min_temp), float(max_temp), description))
 
+            except (KeyError, IndexError) as e:
+                print(f"警告：在 '{location_name}' 解析資料時發生錯誤，已跳過。錯誤：{e}")
+                continue
+        
         conn.commit()
         conn.close()
         print("資料成功存入資料庫！")
@@ -93,13 +81,11 @@ def fetch_and_store_data():
         print(f"網路錯誤：{e}")
     except (KeyError, TypeError, IndexError) as e:
         print(f"解析資料錯誤，請檢查 JSON 結構：{e}")
+        # 如果解析出錯，印出原始資料以供偵錯
+        print("收到的原始資料：", json.dumps(data, indent=2, ensure_ascii=False))
     except Exception as e:
         print(f"發生未預期錯誤：{e}")
 
 if __name__ == "__main__":
-    # 執行前先關閉 requests 的 InsecureRequestWarning 警告
-    from requests.packages.urllib3.exceptions import InsecureRequestWarning
-    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-    
     init_db()
     fetch_and_store_data()
