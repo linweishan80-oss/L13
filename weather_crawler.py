@@ -43,8 +43,13 @@ def fetch_and_store_data():
             print("錯誤：API 回應失敗。")
             return
         
-        # 新 API 的資料位於 records['locations'][0]['location']
-        locations = data['records']['locations'][0]['location']
+        # CWA API 可能有兩種結構，增加彈性以應對
+        try:
+            # 結構 1: records -> locations -> location
+            locations = data['records']['locations'][0]['location']
+        except KeyError:
+            # 結構 2: records -> location
+            locations = data['records']['location']
         
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
